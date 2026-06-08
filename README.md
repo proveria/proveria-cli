@@ -22,6 +22,8 @@ proveria --version
 proveria --help
 ```
 
+For a complete walkthrough, see [Getting Started With Proveria CLI](docs/getting-started.md).
+
 Build from source:
 
 ```bash
