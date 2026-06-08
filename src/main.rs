@@ -205,6 +205,8 @@ enum ApiKeysSubcommand {
     Create(ApiKeyCreate),
     /// List workspace API keys.
     List(ApiKeyList),
+    /// Create a replacement key and revoke an existing key.
+    Rotate(ApiKeyRotate),
     /// Revoke a workspace API key.
     Revoke(ApiKeyRevoke),
 }
@@ -225,6 +227,31 @@ struct ApiKeyCreate {
     expires_in: Option<String>,
 
     #[arg(long, help = "Save the returned token as the active CLI API key.")]
+    use_key: bool,
+
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    output: OutputFormat,
+}
+
+#[derive(Args)]
+struct ApiKeyRotate {
+    #[arg(value_name = "API_KEY_ID")]
+    id: String,
+
+    #[arg(long, help = "Name for the replacement key.")]
+    name: Option<String>,
+
+    #[arg(long = "scope")]
+    scopes: Vec<String>,
+
+    #[arg(
+        long,
+        value_name = "DURATION",
+        help = "Expire the replacement key after a duration such as 30d, 12h, or 90m."
+    )]
+    expires_in: Option<String>,
+
+    #[arg(long, help = "Save the replacement token as the active CLI API key.")]
     use_key: bool,
 
     #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
@@ -758,6 +785,14 @@ struct ApiKeysResponse {
 struct ApiKeyCreateResponse {
     api_key: ApiKeyRecord,
     token: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiKeyRotateResponse {
+    api_key: ApiKeyRecord,
+    token: String,
+    revoked_api_key_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1559,58 +1594,70 @@ async fn run_api_keys(ctx: AppContext, command: ApiKeysCommand) -> Result<()> {
     match command.command {
         ApiKeysSubcommand::Create(input) => {
             let workspace = require_workspace(&ctx)?;
-            let name = input.name.trim();
-            if name.is_empty() {
-                bail!("API key name is required");
-            }
-            let scopes = normalize_api_key_scopes(input.scopes)?;
-            let expires_at = input
-                .expires_in
-                .as_deref()
-                .map(api_key_expiration_from_duration)
-                .transpose()?;
-            let payload = match &expires_at {
-                Some(expires_at) => json!({
-                    "name": name,
-                    "scopes": scopes,
-                    "expiresAt": expires_at,
-                }),
-                None => json!({
-                    "name": name,
-                    "scopes": scopes,
-                }),
-            };
-            let response = session_post::<ApiKeyCreateResponse>(
+            let response = create_workspace_api_key(
                 &ctx,
-                &format!("/tenants/{workspace}/api-keys"),
-                payload,
+                workspace,
+                &input.name,
+                input.scopes,
+                input.expires_in,
             )
             .await?;
 
             if input.use_key {
-                let mut config = load_config()?;
-                config.api_url = Some(ctx.api_url.clone());
-                config.workspace = Some(workspace.to_string());
-                config.api_key = Some(response.token.clone());
-                save_config(&config)?;
+                save_active_api_key(&ctx, workspace, &response.token)?;
             }
 
             match input.output {
                 OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
                 OutputFormat::Text => {
-                    println!("Created API key {}", response.api_key.id);
-                    println!("name: {}", response.api_key.name);
-                    println!("prefix: {}", response.api_key.key_prefix);
-                    println!("scopes: {}", response.api_key.scopes.join(","));
-                    println!(
-                        "expires: {}",
-                        response.api_key.expires_at.as_deref().unwrap_or("never")
-                    );
-                    println!("token: {}", response.token);
+                    print_created_api_key(&response);
                     if input.use_key {
                         println!("Saved token as the active CLI API key.");
                     } else {
                         println!("Token is shown once. Store it now or rerun with --use-key.");
+                    }
+                }
+            }
+            Ok(())
+        }
+        ApiKeysSubcommand::Rotate(input) => {
+            let workspace = require_workspace(&ctx)?;
+            let replacement_name = input
+                .name
+                .unwrap_or_else(|| format!("Rotation replacement for {}", input.id));
+            let response = create_workspace_api_key(
+                &ctx,
+                workspace,
+                &replacement_name,
+                input.scopes,
+                input.expires_in,
+            )
+            .await?;
+            session_delete(&ctx, &format!("/tenants/{workspace}/api-keys/{}", input.id)).await?;
+
+            if input.use_key {
+                save_active_api_key(&ctx, workspace, &response.token)?;
+            }
+
+            match input.output {
+                OutputFormat::Json => {
+                    let body = ApiKeyRotateResponse {
+                        api_key: response.api_key,
+                        token: response.token,
+                        revoked_api_key_id: input.id,
+                    };
+                    println!("{}", serde_json::to_string_pretty(&body)?);
+                }
+                OutputFormat::Text => {
+                    println!("Rotated API key {}", input.id);
+                    print_created_api_key(&response);
+                    println!("revoked: {}", input.id);
+                    if input.use_key {
+                        println!("Saved replacement token as the active CLI API key.");
+                    } else {
+                        println!(
+                            "Replacement token is shown once. Store it now or rerun with --use-key."
+                        );
                     }
                 }
             }
@@ -1657,6 +1704,57 @@ async fn run_api_keys(ctx: AppContext, command: ApiKeysCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn create_workspace_api_key(
+    ctx: &AppContext,
+    workspace: &str,
+    name: &str,
+    scopes: Vec<String>,
+    expires_in: Option<String>,
+) -> Result<ApiKeyCreateResponse> {
+    let name = name.trim();
+    if name.is_empty() {
+        bail!("API key name is required");
+    }
+    let scopes = normalize_api_key_scopes(scopes)?;
+    let expires_at = expires_in
+        .as_deref()
+        .map(api_key_expiration_from_duration)
+        .transpose()?;
+    let payload = match &expires_at {
+        Some(expires_at) => json!({
+            "name": name,
+            "scopes": scopes,
+            "expiresAt": expires_at,
+        }),
+        None => json!({
+            "name": name,
+            "scopes": scopes,
+        }),
+    };
+    session_post::<ApiKeyCreateResponse>(ctx, &format!("/tenants/{workspace}/api-keys"), payload)
+        .await
+}
+
+fn save_active_api_key(ctx: &AppContext, workspace: &str, token: &str) -> Result<()> {
+    let mut config = load_config()?;
+    config.api_url = Some(ctx.api_url.clone());
+    config.workspace = Some(workspace.to_string());
+    config.api_key = Some(token.to_string());
+    save_config(&config)
+}
+
+fn print_created_api_key(response: &ApiKeyCreateResponse) {
+    println!("Created API key {}", response.api_key.id);
+    println!("name: {}", response.api_key.name);
+    println!("prefix: {}", response.api_key.key_prefix);
+    println!("scopes: {}", response.api_key.scopes.join(","));
+    println!(
+        "expires: {}",
+        response.api_key.expires_at.as_deref().unwrap_or("never")
+    );
+    println!("token: {}", response.token);
 }
 
 fn print_webhook_endpoint(endpoint: &WebhookEndpoint) {
@@ -3132,5 +3230,12 @@ mod tests {
         .expect("valid scopes");
 
         assert_eq!(scopes, vec!["read".to_string(), "write".to_string()]);
+    }
+
+    #[test]
+    fn api_key_expiration_duration_rejects_non_positive_values() {
+        let error = api_key_expiration_from_duration("0d").expect_err("rejects zero days");
+
+        assert!(error.to_string().contains("greater than zero"));
     }
 }

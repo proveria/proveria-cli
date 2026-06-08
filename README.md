@@ -48,6 +48,8 @@ proveria api-keys create \
 
 `--expires-in` accepts minutes, hours, days, or weeks, such as `90m`, `12h`,
 `90d`, or `4w`.
+Use `proveria api-keys rotate <api-key-id> --expires-in 90d --use-key` to
+create a replacement key, revoke the old key, and save the replacement locally.
 
 ```bash
 proveria config set \
