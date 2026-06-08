@@ -134,6 +134,7 @@ proveria completions fish > proveria.fish
 
 ## License
 
-This source release is provided for Proveria CLI distribution and inspection.
-Use, copying, modification, or redistribution requires permission from Proveria
-unless a separate written license applies.
+The Proveria CLI is source-available under the Proveria CLI License. You may
+install, run, and inspect it for use with Proveria services. Redistribution,
+modified distribution, and competing-service use are not permitted without
+Proveria's written permission.
