@@ -1,0 +1,122 @@
+name: Proveria CLI Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example proveria-cli-v0.1.0
+        required: true
+        type: string
+  push:
+    tags:
+      - "proveria-cli-v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: proveria
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+            bin_ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+            bin_ext: ""
+          - os: windows-2025-vs2026
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+            bin_ext: ".exe"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Smoke built binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="$PWD/target/${{ matrix.target }}/release/${BIN_NAME}${{ matrix.bin_ext }}"
+          "$binary" --help
+          "$binary" --version
+
+      - name: Package Unix archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${BIN_NAME}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "dist/${BIN_NAME}"
+          tar -C dist -czf "$archive" "${BIN_NAME}"
+          shasum -a 256 "$archive" > "$archive.sha256"
+
+      - name: Package Windows archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = "${env:BIN_NAME}-${{ matrix.target }}.${{ matrix.archive_ext }}"
+          New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${env:BIN_NAME}${{ matrix.bin_ext }}" "dist/${env:BIN_NAME}${{ matrix.bin_ext }}"
+          Compress-Archive -Path "dist/${env:BIN_NAME}${{ matrix.bin_ext }}" -DestinationPath $archive -Force
+          $hash = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+          [System.IO.File]::WriteAllText("$archive.sha256", "$hash  $archive`n", [System.Text.Encoding]::ASCII)
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v6
+        with:
+          name: proveria-cli-${{ matrix.target }}
+          path: |
+            proveria-${{ matrix.target }}.${{ matrix.archive_ext }}
+            proveria-${{ matrix.target }}.${{ matrix.archive_ext }}.sha256
+
+  publish:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v8
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Resolve tag
+        id: release
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.tag }}
+          draft: true
+          fail_on_unmatched_files: true
+          files: release-artifacts/*
