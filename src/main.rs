@@ -24,19 +24,56 @@ const SESSION_COOKIE_NAME: &str = "proveria_session";
 const CONTENT_PROOF_METHODS: [&str; 3] = ["plain-text/v1", "pdf-text-layer/v1", "ocr-tesseract/v1"];
 const CONTENT_PROOF_PRESETS: [(&str, usize, usize); 3] =
     [("standard", 7, 1), ("broad", 12, 3), ("sensitive", 4, 1)];
+const ROOT_HELP_EXAMPLES: &str = "\
+Examples:
+  proveria config set --api-url http://127.0.0.1:3001 --workspace evaluation-workspace --api-key prv_v1_...
+  proveria prove ./example.pdf --project evaluation-evidence --name example-proof
+  proveria records get <attestation-id>
+  proveria receipt <attestation-id> --json --pdf --output ./receipts
+  proveria verify ./example.pdf --attestation <attestation-id>
+
+Guide:
+  https://github.com/proveria/proveria-cli/blob/main/docs/getting-started.md";
+const PROVE_HELP_EXAMPLES: &str = "\
+Examples:
+  proveria prove ./example.pdf --project evaluation-evidence --name example-proof
+  proveria prove <sha256> --project evaluation-evidence --name external-proof --file-name invoice.pdf --byte-size 1234
+  proveria prove ./example.pdf --project evaluation-evidence --compliance-json ./compliance-controls.json
+
+Input:
+  INPUT can be a local file path or a 64-character SHA-256 hash.
+  File bytes stay local; the CLI sends hash metadata to Proveria.";
+const VERIFY_HELP_EXAMPLES: &str = "\
+Examples:
+  proveria verify ./example.pdf --attestation <attestation-id>
+  proveria verify <sha256> --attestation <attestation-id>
+  proveria verify passage \"Paste one continuous source passage here.\" --attestation <attestation-id>
+
+Input:
+  INPUT can be a local file path or a 64-character SHA-256 hash.
+  Use `verify passage` for text content-proof lookups.";
+const RECEIPT_HELP_EXAMPLES: &str = "\
+Examples:
+  proveria receipt <attestation-id>
+  proveria receipt <attestation-id> --json --pdf --output ./receipts";
+const RECORDS_HELP_EXAMPLES: &str = "\
+Examples:
+  proveria records get <attestation-id>
+  proveria records get <attestation-id> --output json";
 
 #[derive(Parser)]
 #[command(name = "proveria")]
-#[command(about = "Proveria CLI for API-first provenance workflows")]
+#[command(about = "Create and verify Proveria proof records from the command line")]
+#[command(after_help = ROOT_HELP_EXAMPLES)]
 #[command(version)]
 struct Cli {
-    #[arg(long, global = true, env = "PROVERIA_API_URL")]
+    #[arg(long, global = true, env = "PROVERIA_API_URL", help = "Proveria API base URL")]
     api_url: Option<String>,
 
-    #[arg(long, global = true, env = "PROVERIA_API_KEY")]
+    #[arg(long, global = true, env = "PROVERIA_API_KEY", help = "Workspace API key")]
     api_key: Option<String>,
 
-    #[arg(long, global = true, env = "PROVERIA_WORKSPACE")]
+    #[arg(long, global = true, env = "PROVERIA_WORKSPACE", help = "Workspace slug")]
     workspace: Option<String>,
 
     #[command(subcommand)]
@@ -65,15 +102,15 @@ enum Command {
     Hash(HashCommand),
     /// Manage projects.
     Projects(ProjectsCommand),
-    /// Create a proof record from a file or SHA-256 hash.
+    /// Create a proof record from a local file or external SHA-256 hash.
     Prove(ProveCommand),
     /// Read attestation records.
     Records(RecordsCommand),
-    /// Download attestation receipt artifacts.
+    /// Show or download attestation receipt artifacts.
     Receipt(ReceiptCommand),
     /// Download verification result artifacts.
     Result(ResultCommand),
-    /// Verify a file, SHA-256 hash, or text passage.
+    /// Verify a file, SHA-256 hash, or text passage against an attestation.
     Verify(VerifyCommand),
     /// Manage webhook endpoints and deliveries.
     Webhooks(WebhooksCommand),
@@ -358,6 +395,7 @@ struct ProjectCreate {
 }
 
 #[derive(Args)]
+#[command(after_help = RECORDS_HELP_EXAMPLES)]
 struct RecordsCommand {
     #[command(subcommand)]
     command: RecordsSubcommand,
@@ -365,39 +403,41 @@ struct RecordsCommand {
 
 #[derive(Subcommand)]
 enum RecordsSubcommand {
+    /// Show one attestation record by id.
     Get(RecordsGet),
 }
 
 #[derive(Args)]
 struct RecordsGet {
-    #[arg(value_name = "ATTESTATION")]
+    #[arg(value_name = "ATTESTATION", help = "Attestation id to inspect")]
     attestation: String,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 }
 
 #[derive(Args)]
+#[command(after_help = PROVE_HELP_EXAMPLES)]
 struct ProveCommand {
-    #[arg(value_name = "INPUT")]
+    #[arg(value_name = "INPUT", help = "Local file path or 64-character SHA-256 hash")]
     input: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Project slug to store the proof record under")]
     project: Option<String>,
 
-    #[arg(long, alias = "label")]
+    #[arg(long, alias = "label", help = "Human-readable proof record name")]
     name: Option<String>,
 
-    #[arg(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE", help = "JSON object to hash and attach as compliance evidence")]
     compliance_json: Option<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, help = "Source file name for an external SHA-256 proof")]
     file_name: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Source byte size for an external SHA-256 proof")]
     byte_size: Option<u64>,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 
     #[command(subcommand)]
@@ -406,55 +446,58 @@ struct ProveCommand {
 
 #[derive(Subcommand)]
 enum ProveSubcommand {
+    /// Create a proof record from an external SHA-256 hash.
     Hash(ProveHash),
+    /// Create a proof record from a local file path.
     File(ProveFile),
 }
 
 #[derive(Args)]
 struct ProveHash {
-    #[arg(value_name = "SHA256")]
+    #[arg(value_name = "SHA256", help = "64-character SHA-256 hash")]
     sha256: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Project slug to store the proof record under")]
     project: String,
 
-    #[arg(long, alias = "label")]
+    #[arg(long, alias = "label", help = "Human-readable proof record name")]
     name: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Source file name for the external hash")]
     file_name: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Source byte size for the external hash")]
     byte_size: Option<u64>,
 
-    #[arg(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE", help = "JSON object to hash and attach as compliance evidence")]
     compliance_json: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 }
 
 #[derive(Args)]
 struct ProveFile {
-    #[arg(value_name = "FILE")]
+    #[arg(value_name = "FILE", help = "Local file to hash")]
     file: PathBuf,
 
-    #[arg(long)]
+    #[arg(long, help = "Project slug to store the proof record under")]
     project: String,
 
-    #[arg(long, alias = "label")]
+    #[arg(long, alias = "label", help = "Human-readable proof record name")]
     name: Option<String>,
 
-    #[arg(long, value_name = "FILE")]
+    #[arg(long, value_name = "FILE", help = "JSON object to hash and attach as compliance evidence")]
     compliance_json: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 }
 
 #[derive(Args)]
+#[command(after_help = RECEIPT_HELP_EXAMPLES)]
 struct ReceiptCommand {
-    #[arg(value_name = "ATTESTATION")]
+    #[arg(value_name = "ATTESTATION", help = "Attestation id")]
     attestation: String,
 
     #[arg(long, help = "Download the signed receipt JSON artifact.")]
@@ -491,14 +534,15 @@ struct ResultCommand {
 }
 
 #[derive(Args)]
+#[command(after_help = VERIFY_HELP_EXAMPLES)]
 struct VerifyCommand {
-    #[arg(value_name = "INPUT")]
+    #[arg(value_name = "INPUT", help = "Local file path or 64-character SHA-256 hash")]
     input: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, help = "Attestation id to verify against")]
     attestation: Option<String>,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 
     #[command(subcommand)]
@@ -507,44 +551,47 @@ struct VerifyCommand {
 
 #[derive(Subcommand)]
 enum VerifySubcommand {
+    /// Verify a SHA-256 hash against an attestation.
     Hash(VerifyHash),
+    /// Hash a local file and verify it against an attestation.
     File(VerifyFile),
+    /// Hash a text passage locally and verify it against content proof.
     Passage(VerifyPassage),
 }
 
 #[derive(Args)]
 struct VerifyHash {
-    #[arg(value_name = "SHA256")]
+    #[arg(value_name = "SHA256", help = "64-character SHA-256 hash")]
     sha256: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Attestation id to verify against")]
     attestation: String,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 }
 
 #[derive(Args)]
 struct VerifyFile {
-    #[arg(value_name = "FILE")]
+    #[arg(value_name = "FILE", help = "Local file to hash and verify")]
     file: PathBuf,
 
-    #[arg(long)]
+    #[arg(long, help = "Attestation id to verify against")]
     attestation: String,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 }
 
 #[derive(Args)]
 struct VerifyPassage {
-    #[arg(value_name = "TEXT")]
+    #[arg(value_name = "TEXT", help = "Continuous source passage to hash locally")]
     text: String,
 
-    #[arg(long)]
+    #[arg(long, help = "Attestation id to verify against")]
     attestation: String,
 
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
     output: OutputFormat,
 }
 
