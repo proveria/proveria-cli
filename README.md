@@ -35,6 +35,20 @@ cargo install --path . --force
 Most API-backed commands require a Proveria API URL, workspace slug, and
 workspace API key.
 
+Create a short-lived workspace API key from an admin session:
+
+```bash
+proveria api-keys create \
+  --name "CLI automation" \
+  --scope read \
+  --scope write \
+  --expires-in 90d \
+  --use-key
+```
+
+`--expires-in` accepts minutes, hours, days, or weeks, such as `90m`, `12h`,
+`90d`, or `4w`.
+
 ```bash
 proveria config set \
   --api-url https://api.example.com \

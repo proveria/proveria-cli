@@ -40,6 +40,24 @@ API-backed commands need three values:
 - `workspace`: workspace slug
 - `api_key`: workspace API key
 
+If you have an admin session, create a short-lived workspace API key:
+
+```bash
+proveria auth login \
+  --email admin-producer-eval@example.com \
+  --password admin-producer-eval-password-123
+
+proveria api-keys create \
+  --name "CLI development" \
+  --scope read \
+  --scope write \
+  --expires-in 90d \
+  --use-key
+```
+
+`--expires-in` accepts minutes, hours, days, or weeks, such as `90m`, `12h`,
+`90d`, or `4w`.
+
 Save them locally:
 
 ```bash

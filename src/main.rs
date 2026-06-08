@@ -17,6 +17,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use time::{Duration as TimeDuration, OffsetDateTime, format_description::well_known::Rfc3339};
 use unicode_normalization::UnicodeNormalization;
 
 const DEFAULT_API_URL: &str = "http://127.0.0.1:3001";
@@ -67,13 +68,28 @@ Examples:
 #[command(after_help = ROOT_HELP_EXAMPLES)]
 #[command(version)]
 struct Cli {
-    #[arg(long, global = true, env = "PROVERIA_API_URL", help = "Proveria API base URL")]
+    #[arg(
+        long,
+        global = true,
+        env = "PROVERIA_API_URL",
+        help = "Proveria API base URL"
+    )]
     api_url: Option<String>,
 
-    #[arg(long, global = true, env = "PROVERIA_API_KEY", help = "Workspace API key")]
+    #[arg(
+        long,
+        global = true,
+        env = "PROVERIA_API_KEY",
+        help = "Workspace API key"
+    )]
     api_key: Option<String>,
 
-    #[arg(long, global = true, env = "PROVERIA_WORKSPACE", help = "Workspace slug")]
+    #[arg(
+        long,
+        global = true,
+        env = "PROVERIA_WORKSPACE",
+        help = "Workspace slug"
+    )]
     workspace: Option<String>,
 
     #[command(subcommand)]
@@ -200,6 +216,13 @@ struct ApiKeyCreate {
 
     #[arg(long = "scope")]
     scopes: Vec<String>,
+
+    #[arg(
+        long,
+        value_name = "DURATION",
+        help = "Expire the key after a duration such as 30d, 12h, or 90m."
+    )]
+    expires_in: Option<String>,
 
     #[arg(long, help = "Save the returned token as the active CLI API key.")]
     use_key: bool,
@@ -419,7 +442,10 @@ struct RecordsGet {
 #[derive(Args)]
 #[command(after_help = PROVE_HELP_EXAMPLES)]
 struct ProveCommand {
-    #[arg(value_name = "INPUT", help = "Local file path or 64-character SHA-256 hash")]
+    #[arg(
+        value_name = "INPUT",
+        help = "Local file path or 64-character SHA-256 hash"
+    )]
     input: Option<String>,
 
     #[arg(long, help = "Project slug to store the proof record under")]
@@ -428,7 +454,11 @@ struct ProveCommand {
     #[arg(long, alias = "label", help = "Human-readable proof record name")]
     name: Option<String>,
 
-    #[arg(long, value_name = "FILE", help = "JSON object to hash and attach as compliance evidence")]
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "JSON object to hash and attach as compliance evidence"
+    )]
     compliance_json: Option<PathBuf>,
 
     #[arg(long, help = "Source file name for an external SHA-256 proof")]
@@ -469,7 +499,11 @@ struct ProveHash {
     #[arg(long, help = "Source byte size for the external hash")]
     byte_size: Option<u64>,
 
-    #[arg(long, value_name = "FILE", help = "JSON object to hash and attach as compliance evidence")]
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "JSON object to hash and attach as compliance evidence"
+    )]
     compliance_json: Option<PathBuf>,
 
     #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
@@ -487,7 +521,11 @@ struct ProveFile {
     #[arg(long, alias = "label", help = "Human-readable proof record name")]
     name: Option<String>,
 
-    #[arg(long, value_name = "FILE", help = "JSON object to hash and attach as compliance evidence")]
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "JSON object to hash and attach as compliance evidence"
+    )]
     compliance_json: Option<PathBuf>,
 
     #[arg(long, value_enum, default_value_t = OutputFormat::Text, help = "Output format")]
@@ -536,7 +574,10 @@ struct ResultCommand {
 #[derive(Args)]
 #[command(after_help = VERIFY_HELP_EXAMPLES)]
 struct VerifyCommand {
-    #[arg(value_name = "INPUT", help = "Local file path or 64-character SHA-256 hash")]
+    #[arg(
+        value_name = "INPUT",
+        help = "Local file path or 64-character SHA-256 hash"
+    )]
     input: Option<String>,
 
     #[arg(long, help = "Attestation id to verify against")]
@@ -585,7 +626,10 @@ struct VerifyFile {
 
 #[derive(Args)]
 struct VerifyPassage {
-    #[arg(value_name = "TEXT", help = "Continuous source passage to hash locally")]
+    #[arg(
+        value_name = "TEXT",
+        help = "Continuous source passage to hash locally"
+    )]
     text: String,
 
     #[arg(long, help = "Attestation id to verify against")]
@@ -725,6 +769,7 @@ struct ApiKeyRecord {
     scopes: Vec<String>,
     created_by_user_id: Option<String>,
     created_at: String,
+    expires_at: Option<String>,
     last_used_at: Option<String>,
     revoked_at: Option<String>,
 }
@@ -1519,13 +1564,26 @@ async fn run_api_keys(ctx: AppContext, command: ApiKeysCommand) -> Result<()> {
                 bail!("API key name is required");
             }
             let scopes = normalize_api_key_scopes(input.scopes)?;
-            let response = session_post::<ApiKeyCreateResponse>(
-                &ctx,
-                &format!("/tenants/{workspace}/api-keys"),
-                json!({
+            let expires_at = input
+                .expires_in
+                .as_deref()
+                .map(api_key_expiration_from_duration)
+                .transpose()?;
+            let payload = match &expires_at {
+                Some(expires_at) => json!({
+                    "name": name,
+                    "scopes": scopes,
+                    "expiresAt": expires_at,
+                }),
+                None => json!({
                     "name": name,
                     "scopes": scopes,
                 }),
+            };
+            let response = session_post::<ApiKeyCreateResponse>(
+                &ctx,
+                &format!("/tenants/{workspace}/api-keys"),
+                payload,
             )
             .await?;
 
@@ -1544,6 +1602,10 @@ async fn run_api_keys(ctx: AppContext, command: ApiKeysCommand) -> Result<()> {
                     println!("name: {}", response.api_key.name);
                     println!("prefix: {}", response.api_key.key_prefix);
                     println!("scopes: {}", response.api_key.scopes.join(","));
+                    println!(
+                        "expires: {}",
+                        response.api_key.expires_at.as_deref().unwrap_or("never")
+                    );
                     println!("token: {}", response.token);
                     if input.use_key {
                         println!("Saved token as the active CLI API key.");
@@ -1566,7 +1628,7 @@ async fn run_api_keys(ctx: AppContext, command: ApiKeysCommand) -> Result<()> {
                         println!("No API keys found.");
                         return Ok(());
                     }
-                    println!("CREATED\tSTATUS\tSCOPES\tPREFIX\tNAME\tID");
+                    println!("CREATED\tSTATUS\tEXPIRES\tSCOPES\tPREFIX\tNAME\tID");
                     for key in response.api_keys {
                         let status = if key.revoked_at.is_some() {
                             "revoked"
@@ -1574,9 +1636,10 @@ async fn run_api_keys(ctx: AppContext, command: ApiKeysCommand) -> Result<()> {
                             "active"
                         };
                         println!(
-                            "{}\t{}\t{}\t{}\t{}\t{}",
+                            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                             key.created_at,
                             status,
+                            key.expires_at.as_deref().unwrap_or("never"),
                             key.scopes.join(","),
                             key.key_prefix,
                             key.name,
@@ -2809,6 +2872,32 @@ fn normalize_api_key_scopes(scopes: Vec<String>) -> Result<Vec<String>> {
         }
     }
     Ok(normalized)
+}
+
+fn api_key_expiration_from_duration(input: &str) -> Result<String> {
+    let trimmed = input.trim();
+    if trimmed.len() < 2 {
+        bail!("invalid --expires-in `{input}`. Use a duration like 30d, 12h, or 90m.");
+    }
+    let (amount, unit) = trimmed.split_at(trimmed.len() - 1);
+    let amount: i64 = amount
+        .parse()
+        .with_context(|| format!("invalid --expires-in `{input}`. Use a numeric duration."))?;
+    if amount <= 0 {
+        bail!("invalid --expires-in `{input}`. Duration must be greater than zero.");
+    }
+    let duration = match unit {
+        "m" => TimeDuration::minutes(amount),
+        "h" => TimeDuration::hours(amount),
+        "d" => TimeDuration::days(amount),
+        "w" => TimeDuration::weeks(amount),
+        _ => bail!("invalid --expires-in `{input}`. Use m, h, d, or w."),
+    };
+    OffsetDateTime::now_utc()
+        .checked_add(duration)
+        .ok_or_else(|| anyhow!("invalid --expires-in `{input}`. Duration is too large."))?
+        .format(&Rfc3339)
+        .context("failed to format API key expiration")
 }
 
 fn default_label_from_path(path: &Path) -> String {
