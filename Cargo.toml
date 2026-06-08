@@ -2,7 +2,7 @@
 name = "proveria"
 description = "Proveria CLI for local hashing, attestations, receipts, and API workflows"
 edition = "2024"
-license = "UNLICENSED"
+license-file = "LICENSE"
 version = "0.1.0"
 
 [[bin]]

@@ -1,7 +1,66 @@
-Copyright (c) Proveria
+Proveria CLI License
+Version 1.0
 
-All rights reserved.
+Copyright (c) 2026 Proveria. All rights reserved.
 
-This source release is provided for Proveria CLI distribution and inspection.
-Use, copying, modification, or redistribution requires permission from Proveria
-unless a separate written license applies.
+This license applies to the Proveria command line interface and its source code
+in this repository (the "Software").
+
+1. License Grant
+
+Proveria grants you a limited, non-exclusive, non-transferable, revocable
+license to install, execute, and use the Software solely to interact with
+Proveria services; evaluate Proveria workflows; and manage Proveria proof,
+verification, receipt, export, and integration workflows.
+
+You may inspect the source code for security, compatibility, interoperability,
+and operational review. You may make internal modifications solely for your own
+internal use with Proveria services, but you may not distribute modified
+versions of the Software.
+
+2. Restrictions
+
+You may not, without Proveria's prior written permission:
+
+a. sell, sublicense, rent, lease, host, or provide the Software as a standalone
+   product or service;
+b. distribute, publish, or make available modified versions of the Software;
+c. use the Software or its source code to build, train, operate, support, or
+   enable a competing proof, provenance, attestation, receipt, verification,
+   evidence-management, or compliance-evidence product or service;
+d. remove, obscure, or alter copyright, license, trademark, attribution, or
+   proprietary notices;
+e. use Proveria names, logos, product names, or marks except as necessary to
+   identify interoperability with Proveria services;
+f. reverse engineer any non-source binary component of the Software, except to
+   the extent applicable law forbids this restriction.
+
+3. Third-Party Components
+
+Third-party dependencies, libraries, packages, and other components included in
+or used by the Software remain subject to their own license terms. This license
+does not modify those third-party license terms.
+
+4. No Service or Trademark Rights
+
+This license does not grant rights to Proveria services, APIs, hosted systems,
+trademarks, confidential information, trade secrets, or other Proveria products.
+Access to Proveria services may be governed by separate terms, credentials,
+rate limits, subscriptions, or written agreements.
+
+5. Reservation of Rights
+
+Any rights not expressly granted in this license are reserved by Proveria.
+
+6. Disclaimer
+
+The Software is provided "as is", without warranties of any kind, whether
+express, implied, statutory, or otherwise, including warranties of
+merchantability, fitness for a particular purpose, title, and non-infringement.
+
+7. Limitation of Liability
+
+To the maximum extent permitted by law, Proveria will not be liable for any
+indirect, incidental, special, consequential, exemplary, or punitive damages, or
+for any loss of profits, revenue, data, goodwill, or business opportunity,
+arising from or related to the Software or this license.
